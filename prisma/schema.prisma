@@ -1,0 +1,171 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         String        @default("CUSTOMER") // ADMIN, STAFF, CUSTOMER
+  avatar       String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  appointments Appointment[]
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  image       String?
+  orderIndex  Int       @default(0)
+  services    Service[]
+  createdAt   DateTime  @default(now())
+}
+
+model Service {
+  id                  String               @id @default(cuid())
+  name                String
+  slug                String               @unique
+  categoryId          String
+  category            Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  description         String
+  durationMinutes     Int                  @default(45)
+  price               Float
+  image               String
+  isFeatured          Boolean              @default(false)
+  isActive            Boolean              @default(true)
+  appointmentServices AppointmentService[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model Staff {
+  id              String          @id @default(cuid())
+  name            String
+  title           String          // e.g. "Master Stylist & Creative Director"
+  bio             String
+  photo           String
+  experienceYears Int             @default(5)
+  rating          Float           @default(5.0)
+  reviewCount     Int             @default(0)
+  specializations String          // JSON array or comma-separated
+  instagram       String?
+  isActive        Boolean         @default(true)
+  email           String?
+  phone           String?
+  schedules       StaffSchedule[]
+  appointments    Appointment[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model StaffSchedule {
+  id         String   @id @default(cuid())
+  staffId    String
+  staff      Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  dayOfWeek  Int      // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  startTime  String   @default("09:00")
+  endTime    String   @default("19:00")
+  isWorking  Boolean  @default(true)
+  breakStart String?  @default("13:00")
+  breakEnd   String?  @default("14:00")
+
+  @@unique([staffId, dayOfWeek])
+}
+
+model Appointment {
+  id                 String               @id @default(cuid())
+  bookingReference   String               @unique // e.g. ELX-2027-4821
+  customerId         String?
+  customer           User?                @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName       String
+  customerEmail      String
+  customerPhone      String
+  notes              String?
+  staffId            String?
+  staff              Staff?               @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  date               String               // YYYY-MM-DD
+  startTime          String               // HH:mm
+  endTime            String               // HH:mm
+  totalDuration      Int                  // total minutes
+  totalPrice         Float
+  status             String               @default("CONFIRMED") // PENDING, CONFIRMED, COMPLETED, CANCELLED, NO_SHOW
+  cancellationReason String?
+  appointmentServices AppointmentService[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([date, staffId])
+  @@index([bookingReference])
+  @@index([customerEmail])
+}
+
+model AppointmentService {
+  id                String      @id @default(cuid())
+  appointmentId     String
+  appointment       Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  serviceId         String
+  service           Service     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  priceAtBooking    Float
+  durationAtBooking Int
+}
+
+model SalonSettings {
+  id                     String  @id @default("default")
+  salonName              String  @default("ÉLIXIR HAUTE BEAUTÉ")
+  tagline                String  @default("Where Artistry Meets Transcendence")
+  phone                  String  @default("+1 (212) 890-7733")
+  email                  String  @default("concierge@elixirhautebeaute.com")
+  address                String  @default("740 Madison Avenue, New York, NY 10065")
+  openingTime            String  @default("09:00")
+  closingTime            String  @default("20:00")
+  workingDays            String  @default("Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday")
+  cancellationHoursNotice Int     @default(24)
+  currencySymbol         String  @default("$")
+  currencyCode           String  @default("USD")
+  instagramUrl           String  @default("https://instagram.com")
+  whatsappNumber         String  @default("+12128907733")
+  mapsEmbedUrl           String?
+}
+
+model GalleryItem {
+  id          String   @id @default(cuid())
+  title       String
+  category    String   // EDITORIAL, BRIDAL, COLOR, STYLING, SPA, SALON
+  image       String
+  beforeImage String?
+  description String?
+  featured    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model Review {
+  id           String   @id @default(cuid())
+  customerName String
+  serviceName  String
+  rating       Int      @default(5)
+  comment      String
+  date         String
+  avatar       String?
+  createdAt    DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  role      String   @default("ADMIN") // ADMIN or CUSTOMER
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+}
