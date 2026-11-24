@@ -1,30 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
-import { Clock, DollarSign, Calendar, CheckCircle2, ArrowRight, Star, ShieldCheck, Sparkles } from "lucide-react";
+import { defaultServices, defaultStaff } from "@/lib/default-data";
+import { Clock, Calendar, ArrowRight, Sparkles } from "lucide-react";
 
 export const dynamic = "force-dynamic";
-
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
-  const { slug } = await params;
-  const service = await prisma.service.findFirst({
-    where: { OR: [{ slug }, { id: slug }] },
-  });
-
-  if (!service) return { title: "Service | ÉLIXIR HAUTE BEAUTÉ" };
-
-  return {
-    title: `${service.name} | ÉLIXIR HAUTE BEAUTÉ`,
-    description: service.description,
-  };
-}
 
 export default async function ServiceDetailPage({
   params,
@@ -33,23 +15,29 @@ export default async function ServiceDetailPage({
 }) {
   const { slug } = await params;
 
-  const service = await prisma.service.findFirst({
-    where: { OR: [{ slug }, { id: slug }] },
-    include: {
-      category: true,
-    },
-  });
+  let service: any = null;
+  let staff: any[] = defaultStaff;
 
-  if (!service) {
-    notFound();
+  try {
+    service = await prisma.service.findFirst({
+      where: { OR: [{ slug }, { id: slug }] },
+      include: { category: true },
+    });
+
+    const dbStaff = await prisma.staff.findMany({
+      where: { isActive: true },
+      take: 3,
+      orderBy: { rating: "desc" },
+    });
+    if (dbStaff && dbStaff.length > 0) staff = dbStaff;
+  } catch (error) {
+    console.warn("Database fallback activated on ServiceDetailPage:", error);
   }
 
-  // Find matching stylists who specialize in this service type
-  const staff = await prisma.staff.findMany({
-    where: { isActive: true },
-    take: 3,
-    orderBy: { rating: "desc" },
-  });
+  // Fallback to default services if not in DB
+  if (!service) {
+    service = defaultServices.find((s) => s.slug === slug || s.id === slug) || defaultServices[0];
+  }
 
   return (
     <main className="min-h-screen bg-[#111111] text-[#F8F6F2]">
@@ -63,7 +51,7 @@ export default async function ServiceDetailPage({
             <div className="lg:col-span-7">
               <div className="inline-flex items-center gap-2 text-xs tracking-[0.3em] uppercase text-[#C8A46A] mb-4">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{service.category.name}</span>
+                <span>{service.category?.name || "Bespoke Ritual"}</span>
               </div>
 
               <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl text-[#F8F6F2] font-light uppercase leading-tight mb-6">

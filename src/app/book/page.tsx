@@ -3,6 +3,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import BookingWizard from "@/components/booking/BookingWizard";
 import { prisma } from "@/lib/prisma";
+import { defaultServices, defaultStaff } from "@/lib/default-data";
 import { Sparkles } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -13,20 +14,29 @@ export const metadata = {
 };
 
 export default async function BookPage() {
-  const [services, staff] = await Promise.all([
-    prisma.service.findMany({
-      where: { isActive: true },
-      include: { category: true },
-      orderBy: [{ isFeatured: "desc" }, { price: "desc" }],
-    }),
-    prisma.staff.findMany({
-      where: { isActive: true },
-      include: {
-        schedules: { orderBy: { dayOfWeek: "asc" } },
-      },
-      orderBy: { rating: "desc" },
-    }),
-  ]);
+  let services: any[] = defaultServices;
+  let staff: any[] = defaultStaff;
+
+  try {
+    const [dbServices, dbStaff] = await Promise.all([
+      prisma.service.findMany({
+        where: { isActive: true },
+        include: { category: true },
+        orderBy: [{ isFeatured: "desc" }, { price: "desc" }],
+      }),
+      prisma.staff.findMany({
+        where: { isActive: true },
+        include: {
+          schedules: { orderBy: { dayOfWeek: "asc" } },
+        },
+        orderBy: { rating: "desc" },
+      }),
+    ]);
+    if (dbServices && dbServices.length > 0) services = dbServices;
+    if (dbStaff && dbStaff.length > 0) staff = dbStaff;
+  } catch (error) {
+    console.warn("Database fallback activated on BookPage:", error);
+  }
 
   return (
     <main className="min-h-screen bg-[#111111] text-[#F8F6F2]">

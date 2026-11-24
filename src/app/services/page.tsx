@@ -2,6 +2,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ServicesCatalog from "@/components/services/ServicesCatalog";
 import { prisma } from "@/lib/prisma";
+import { defaultCategories, defaultServices } from "@/lib/default-data";
 import { Sparkles } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -18,16 +19,25 @@ export default async function ServicesPage({
 }) {
   const { category } = await searchParams;
 
-  const [categories, services] = await Promise.all([
-    prisma.category.findMany({
-      orderBy: { orderIndex: "asc" },
-    }),
-    prisma.service.findMany({
-      where: { isActive: true },
-      include: { category: true },
-      orderBy: [{ isFeatured: "desc" }, { name: "asc" }],
-    }),
-  ]);
+  let categories: any[] = defaultCategories;
+  let services: any[] = defaultServices;
+
+  try {
+    const [dbCategories, dbServices] = await Promise.all([
+      prisma.category.findMany({
+        orderBy: { orderIndex: "asc" },
+      }),
+      prisma.service.findMany({
+        where: { isActive: true },
+        include: { category: true },
+        orderBy: [{ isFeatured: "desc" }, { name: "asc" }],
+      }),
+    ]);
+    if (dbCategories && dbCategories.length > 0) categories = dbCategories;
+    if (dbServices && dbServices.length > 0) services = dbServices;
+  } catch (error) {
+    console.warn("Database fallback activated on ServicesPage:", error);
+  }
 
   return (
     <main className="min-h-screen bg-[#111111] text-[#F8F6F2]">

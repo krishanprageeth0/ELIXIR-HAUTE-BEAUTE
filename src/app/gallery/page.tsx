@@ -2,6 +2,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import GalleryClient from "@/components/gallery/GalleryClient";
 import { prisma } from "@/lib/prisma";
+import { defaultGalleryItems } from "@/lib/default-data";
 import { Sparkles } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -12,9 +13,16 @@ export const metadata = {
 };
 
 export default async function GalleryPage() {
-  const items = await prisma.galleryItem.findMany({
-    orderBy: [{ featured: "desc" }, { createdAt: "desc" }],
-  });
+  let items: any[] = defaultGalleryItems;
+
+  try {
+    const dbItems = await prisma.galleryItem.findMany({
+      orderBy: [{ featured: "desc" }, { createdAt: "desc" }],
+    });
+    if (dbItems && dbItems.length > 0) items = dbItems;
+  } catch (error) {
+    console.warn("Database fallback activated on GalleryPage:", error);
+  }
 
   return (
     <main className="min-h-screen bg-[#111111] text-[#F8F6F2]">

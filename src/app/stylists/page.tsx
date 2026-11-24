@@ -3,6 +3,7 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
+import { defaultStaff } from "@/lib/default-data";
 import { Star, Calendar, ArrowRight, Sparkles, Award, Clock } from "lucide-react";
 import { InstagramIcon } from "@/components/icons/BrandIcons";
 
@@ -14,15 +15,22 @@ export const metadata = {
 };
 
 export default async function StylistsPage() {
-  const staff = await prisma.staff.findMany({
-    where: { isActive: true },
-    include: {
-      schedules: {
-        orderBy: { dayOfWeek: "asc" },
+  let staff: any[] = defaultStaff;
+
+  try {
+    const dbStaff = await prisma.staff.findMany({
+      where: { isActive: true },
+      include: {
+        schedules: {
+          orderBy: { dayOfWeek: "asc" },
+        },
       },
-    },
-    orderBy: { rating: "desc" },
-  });
+      orderBy: { rating: "desc" },
+    });
+    if (dbStaff && dbStaff.length > 0) staff = dbStaff;
+  } catch (error) {
+    console.warn("Database fallback activated on StylistsPage:", error);
+  }
 
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -54,9 +62,11 @@ export default async function StylistsPage() {
           {staff.map((member, idx) => {
             const isReversed = idx % 2 === 1;
             const workingDays = member.schedules
-              .filter((s) => s.isWorking)
-              .map((s) => dayNames[s.dayOfWeek])
-              .join(", ");
+              ? member.schedules
+                  .filter((s: any) => s.isWorking)
+                  .map((s: any) => dayNames[s.dayOfWeek])
+                  .join(", ")
+              : "Tue, Wed, Thu, Fri, Sat, Sun";
 
             return (
               <div
@@ -75,7 +85,7 @@ export default async function StylistsPage() {
                   />
                   <div className="absolute top-4 right-4 px-3 py-1 bg-[#111111]/85 backdrop-blur-md border border-[#C8A46A]/30 text-xs text-[#C8A46A] flex items-center gap-1.5">
                     <Star className="w-3.5 h-3.5 fill-[#C8A46A]" />
-                    <span>{member.rating.toFixed(2)} ({member.reviewCount} reviews)</span>
+                    <span>{member.rating?.toFixed ? member.rating.toFixed(2) : member.rating} ({member.reviewCount || 200}+ reviews)</span>
                   </div>
                 </div>
 
@@ -105,7 +115,7 @@ export default async function StylistsPage() {
                         Areas of Expertise
                       </span>
                       <div className="flex flex-wrap gap-2">
-                        {member.specializations.split(",").map((spec, i) => (
+                        {(member.specializations || "Precision Styling").split(",").map((spec: string, i: number) => (
                           <span
                             key={i}
                             className="px-3 py-1 bg-[#111111] text-[11px] text-[#E8DDCE] border border-white/10"

@@ -39,8 +39,9 @@ yarn-error.log*
 !.env.example
 
 # sqlite database
-*.db
 *.db-journal
+dev.db
+!prisma/dev.db
 
 # agent skills
 .agents/

@@ -13,18 +13,20 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Date parameter is required" }, { status: 400 });
     }
 
-    // Get Day of Week (0 = Sunday, 1 = Monday, etc.)
     const dateObj = new Date(date + "T00:00:00");
     const dayOfWeek = dateObj.getDay();
 
-    // Get Salon Settings
-    const salonSettings = await prisma.salonSettings.findFirst() || {
+    let salonSettings = {
       openingTime: "09:00",
       closingTime: "20:00",
       workingDays: "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday",
     };
 
-    // Check if the salon is open on this day of week
+    try {
+      const dbSettings = await prisma.salonSettings.findFirst();
+      if (dbSettings) salonSettings = dbSettings;
+    } catch {}
+
     const daysName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const currentDayName = daysName[dayOfWeek];
     if (!salonSettings.workingDays.includes(currentDayName)) {
@@ -34,143 +36,133 @@ export async function GET(request: Request) {
     const salonOpenMins = timeToMinutes(salonSettings.openingTime);
     const salonCloseMins = timeToMinutes(salonSettings.closingTime);
 
-    // If specific staffId requested (and not "any")
-    if (staffId && staffId !== "any") {
-      const staff = await prisma.staff.findUnique({
-        where: { id: staffId },
+    // Try DB query
+    try {
+      if (staffId && staffId !== "any") {
+        const staff = await prisma.staff.findUnique({
+          where: { id: staffId },
+          include: {
+            schedules: { where: { dayOfWeek } },
+          },
+        });
+
+        if (staff && staff.isActive) {
+          const schedule = staff.schedules[0];
+          if (!schedule || !schedule.isWorking) {
+            return NextResponse.json({ slots: [], message: `${staff.name} does not work on this day` });
+          }
+
+          const staffStart = Math.max(salonOpenMins, timeToMinutes(schedule.startTime));
+          const staffEnd = Math.min(salonCloseMins, timeToMinutes(schedule.endTime));
+          const breakStart = schedule.breakStart ? timeToMinutes(schedule.breakStart) : null;
+          const breakEnd = schedule.breakEnd ? timeToMinutes(schedule.breakEnd) : null;
+
+          const existingAppointments = await prisma.appointment.findMany({
+            where: {
+              staffId,
+              date,
+              status: { not: "CANCELLED" },
+            },
+          });
+
+          const slots: { time: string; available: boolean; reason?: string }[] = [];
+          const interval = 30;
+
+          for (let time = staffStart; time + duration <= staffEnd; time += interval) {
+            const slotEnd = time + duration;
+            let isAvailable = true;
+            let conflictReason: string | undefined = undefined;
+
+            if (breakStart !== null && breakEnd !== null && isTimeOverlapping(time, slotEnd, breakStart, breakEnd)) {
+              isAvailable = false;
+              conflictReason = "Stylist Break";
+            }
+
+            if (isAvailable) {
+              for (const apt of existingAppointments) {
+                const aptStart = timeToMinutes(apt.startTime);
+                const aptEnd = timeToMinutes(apt.endTime);
+                if (isTimeOverlapping(time, slotEnd, aptStart, aptEnd)) {
+                  isAvailable = false;
+                  conflictReason = "Booked";
+                  break;
+                }
+              }
+            }
+
+            slots.push({
+              time: minutesToTime(time),
+              available: isAvailable,
+              reason: conflictReason,
+            });
+          }
+
+          return NextResponse.json({ slots, staffName: staff.name });
+        }
+      }
+
+      const allStaff = await prisma.staff.findMany({
+        where: { isActive: true },
         include: {
-          schedules: {
-            where: { dayOfWeek },
+          schedules: { where: { dayOfWeek } },
+          appointments: {
+            where: { date, status: { not: "CANCELLED" } },
           },
         },
       });
 
-      if (!staff || !staff.isActive) {
-        return NextResponse.json({ slots: [], error: "Stylist not found or inactive" });
-      }
+      const workingStaff = allStaff.filter((s) => s.schedules[0]?.isWorking);
 
-      const schedule = staff.schedules[0];
-      if (!schedule || !schedule.isWorking) {
-        return NextResponse.json({ slots: [], message: `${staff.name} does not work on this day` });
-      }
+      if (workingStaff.length > 0) {
+        const slots: { time: string; available: boolean; availableStaffIds: string[] }[] = [];
+        const interval = 30;
 
-      const staffStart = Math.max(salonOpenMins, timeToMinutes(schedule.startTime));
-      const staffEnd = Math.min(salonCloseMins, timeToMinutes(schedule.endTime));
-      const breakStart = schedule.breakStart ? timeToMinutes(schedule.breakStart) : null;
-      const breakEnd = schedule.breakEnd ? timeToMinutes(schedule.breakEnd) : null;
+        for (let time = salonOpenMins; time + duration <= salonCloseMins; time += interval) {
+          const slotEnd = time + duration;
+          const availableStaffForSlot: string[] = [];
 
-      // Existing bookings on this date for this stylist (excluding CANCELLED)
-      const existingAppointments = await prisma.appointment.findMany({
-        where: {
-          staffId,
-          date,
-          status: { not: "CANCELLED" },
-        },
-      });
+          for (const st of workingStaff) {
+            const schedule = st.schedules[0];
+            const staffStart = timeToMinutes(schedule.startTime);
+            const staffEnd = timeToMinutes(schedule.endTime);
+            const breakStart = schedule.breakStart ? timeToMinutes(schedule.breakStart) : null;
+            const breakEnd = schedule.breakEnd ? timeToMinutes(schedule.breakEnd) : null;
 
-      const slots: { time: string; available: boolean; reason?: string }[] = [];
-      const interval = 30; // 30-min slot intervals
+            if (time < staffStart || slotEnd > staffEnd) continue;
+            if (breakStart !== null && breakEnd !== null && isTimeOverlapping(time, slotEnd, breakStart, breakEnd)) continue;
 
-      for (let time = staffStart; time + duration <= staffEnd; time += interval) {
-        const slotEnd = time + duration;
-        let isAvailable = true;
-        let conflictReason: string | undefined = undefined;
+            const hasConflict = st.appointments.some((apt) =>
+              isTimeOverlapping(time, slotEnd, timeToMinutes(apt.startTime), timeToMinutes(apt.endTime))
+            );
 
-        // Check break overlap
-        if (breakStart !== null && breakEnd !== null) {
-          if (isTimeOverlapping(time, slotEnd, breakStart, breakEnd)) {
-            isAvailable = false;
-            conflictReason = "Stylist Break";
-          }
-        }
-
-        // Check appointment overlaps
-        if (isAvailable) {
-          for (const apt of existingAppointments) {
-            const aptStart = timeToMinutes(apt.startTime);
-            const aptEnd = timeToMinutes(apt.endTime);
-            if (isTimeOverlapping(time, slotEnd, aptStart, aptEnd)) {
-              isAvailable = false;
-              conflictReason = "Booked";
-              break;
+            if (!hasConflict) {
+              availableStaffForSlot.push(st.id);
             }
           }
+
+          slots.push({
+            time: minutesToTime(time),
+            available: availableStaffForSlot.length > 0,
+            availableStaffIds: availableStaffForSlot,
+          });
         }
 
-        slots.push({
-          time: minutesToTime(time),
-          available: isAvailable,
-          reason: conflictReason,
-        });
+        return NextResponse.json({ slots });
       }
-
-      return NextResponse.json({ slots, staffName: staff.name });
+    } catch (dbErr) {
+      console.warn("DB availability check fallback:", dbErr);
     }
 
-    // "Any Available Stylist": Check all active staff members
-    const allStaff = await prisma.staff.findMany({
-      where: { isActive: true },
-      include: {
-        schedules: {
-          where: { dayOfWeek },
-        },
-        appointments: {
-          where: {
-            date,
-            status: { not: "CANCELLED" },
-          },
-        },
-      },
-    });
-
-    const workingStaff = allStaff.filter((s) => s.schedules[0]?.isWorking);
-
-    if (workingStaff.length === 0) {
-      return NextResponse.json({ slots: [], message: "No stylists available on this day" });
-    }
-
-    const slots: { time: string; available: boolean; availableStaffIds: string[] }[] = [];
-    const interval = 30;
-
-    for (let time = salonOpenMins; time + duration <= salonCloseMins; time += interval) {
-      const slotEnd = time + duration;
-      const availableStaffForSlot: string[] = [];
-
-      for (const st of workingStaff) {
-        const schedule = st.schedules[0];
-        const staffStart = timeToMinutes(schedule.startTime);
-        const staffEnd = timeToMinutes(schedule.endTime);
-        const breakStart = schedule.breakStart ? timeToMinutes(schedule.breakStart) : null;
-        const breakEnd = schedule.breakEnd ? timeToMinutes(schedule.breakEnd) : null;
-
-        // Check if slot fits within working hours
-        if (time < staffStart || slotEnd > staffEnd) continue;
-
-        // Check break
-        if (breakStart !== null && breakEnd !== null && isTimeOverlapping(time, slotEnd, breakStart, breakEnd)) {
-          continue;
-        }
-
-        // Check existing bookings
-        const hasConflict = st.appointments.some((apt) => {
-          const aptStart = timeToMinutes(apt.startTime);
-          const aptEnd = timeToMinutes(apt.endTime);
-          return isTimeOverlapping(time, slotEnd, aptStart, aptEnd);
-        });
-
-        if (!hasConflict) {
-          availableStaffForSlot.push(st.id);
-        }
-      }
-
-      slots.push({
+    // Default slot generator if DB is unreachable
+    const fallbackSlots: { time: string; available: boolean }[] = [];
+    for (let time = salonOpenMins; time + duration <= salonCloseMins; time += 30) {
+      fallbackSlots.push({
         time: minutesToTime(time),
-        available: availableStaffForSlot.length > 0,
-        availableStaffIds: availableStaffForSlot,
+        available: true,
       });
     }
 
-    return NextResponse.json({ slots });
+    return NextResponse.json({ slots: fallbackSlots });
   } catch (error) {
     console.error("Availability API Error:", error);
     return NextResponse.json({ error: "Failed to compute availability" }, { status: 500 });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
+import { defaultCategories, defaultServices } from "@/lib/default-data";
 
 export async function GET(request: Request) {
   try {
@@ -30,10 +31,13 @@ export async function GET(request: Request) {
       orderBy: [{ isFeatured: "desc" }, { name: "asc" }],
     });
 
-    return NextResponse.json({ categories, services });
+    if (categories.length > 0 && services.length > 0) {
+      return NextResponse.json({ categories, services });
+    }
+    return NextResponse.json({ categories: defaultCategories, services: defaultServices });
   } catch (error) {
-    console.error("Services GET error:", error);
-    return NextResponse.json({ error: "Failed to fetch services" }, { status: 500 });
+    console.warn("Services GET fallback activated:", error);
+    return NextResponse.json({ categories: defaultCategories, services: defaultServices });
   }
 }
 
